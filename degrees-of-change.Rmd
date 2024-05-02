@@ -1,0 +1,473 @@
+---
+title: 'Degrees of Change: The Influence of Global Fossil Fuel Consumption on Rising
+  Temperatures'
+author: "Aanisha Newaz"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 2
+    number_sections: yes
+    theme: united
+    highlight: tango
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+```
+
+`{knitr::opts_chunk$set(echo = TRUE)}`/
+
+## Introduction
+
+Climate change has been a recognized global issue for the past century, with the concerns only growing in the 21st century with global warming on the rise. The increase in global temperature caused by greenhouse gas emission, waste decomposition, and burning of fossil fuels can have lasting environmental, social and economical impacts. This includes rising sea levels, extreme weather, and a rise in health risks.
+
+This project aims to analyze the effects global warming has on different parts of the world by following the rising global temperature, and how the usage of fossil fuels contributes to global warming. This project will focus on one source of fossil fuel - coal - as this is known as the single largest source responsible for the rise in global temperatures, according to ClientEarth.org. However, if our data sets show otherwise, we may need to take a different approach.
+
+Some questions we are interested in studying are:
+
+1.  ***What countries have experienced the highest change in average temperature?***
+
+2.  ***How does global warming look in different parts of the world?***
+
+3.  ***What is the most commonly consumed fossil fuel?***
+
+4.  ***Which countries or regions have the highest usage of the commonly consumed fossil fuel?***
+
+5.  ***Is the rate of the rising temperature globally correlated with the usage of fossil fuel globally?***
+
+## Description of Data
+
+### **Chosen data sets:**
+
+**Climate Change: Earth Surface Temperature Data:** <https://www.kaggle.com/datasets/berkeleyearth/climate-change-earth-surface-temperature-data>
+
+This data set repackaged by Berkeley Earth, associated with the Lawrence Berkeley National Laboratory, encompasses 1.6 billion temperature records from 16 different archives, offering a comprehensive view of global temperatures. It covers average land temperatures starting from 1750.
+
+This data set includes **five** different files, from which we will use the following **two** in this study:
+
+**GlobalLandTemperaturesByCountry.csv**
+
+Global Average Land Temperature by Country
+
+**GlobalTemperatures.csv**
+
+Global Average Land Temperature
+
+**Energy Institute - Statistical Review of World Energy (2023):** <https://ourworldindata.org/fossil-fuels>
+
+    Energy Institute - Statistical Review of World Energy (2023); Population based on various sources (2023) – with major processing by Our World in Data
+
+The data set traces the history and current state of global fossil fuel consumption, focusing on coal, oil, and gas. It covers the period from 1800 to recent years, with early data sourced from Vaclav Smil's research on energy transitions and later figures (post-1965) from BP's Statistical Review of World Energy.\
+The source provided has numerous data files regarding the production and consumption of fossil fuels in different parts of the world. However, we will be focusing on **three** different files to help understand the trend in different fossil fuel usage:
+
+**coal-consumption-by-country.csv -** Coal consumption by country
+
+**fossil-fuel-consumption-by-type.csv -** Fossil fuel consumption by type in each country
+
+**global-fossil-fuel-consumption.csv -** Global fossil fuel consumption by type**\
+**
+
+## Analysis of the data
+
+### Load the data files and necessary packages
+
+#### The following files have been extracted from the following source: <https://www.kaggle.com/datasets/berkeleyearth/climate-change-earth-surface-temperature-data?resource=download&select=GlobalTemperatures.csv>
+
+```{r echo=FALSE}
+GlobalTemp <- read.csv("GlobalTemperatures.csv")
+TempByCountry <- read.csv("GlobalLandTemperaturesByCountry.csv")
+```
+
+#### [\<https://ourworldindata.org/fossil-fuels>](https://ourworldindata.org/fossil-fuels){.uri}
+
+```{r echo=FALSE}
+FossilFuelConsumptionByType <- read.csv("fossil-fuel-consumption-by-fuel-type.csv")
+GlobalFossilFuelConsumption <- read.csv("global-fossil-fuel-consumption.csv")
+CoalConsumptionByCountry <- read.csv("coal-consumption-by-country-terawatt-hours-twh.csv")
+```
+
+**Loading all necessary libraries**
+
+```{r include =FALSE}
+# Disclaimer: May need to install certain libraries first
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(ggthemes)
+library(scales)
+library(sf)
+library(grid)
+library(gridExtra)
+library(maps)
+library(rnaturalearth)
+library(viridis)
+```
+
+We will see the attributes of each of the data sets, as it will highlight what attributes to use and rename:
+
+#### Attributes from Temperature data set
+
+```{r}
+colnames(GlobalTemp)
+```
+
+```{r}
+colnames(TempByCountry)
+```
+
+#### Attributes from Fossil fuel data set
+
+```{r}
+colnames(CoalConsumptionByCountry)
+colnames(FossilFuelConsumptionByType)
+colnames(GlobalFossilFuelConsumption)
+```
+
+## Data Cleaning and Manipulation
+
+We will rename some columns to make the data more readable and easily accessible:
+
+```{r}
+GlobalTemp <- GlobalTemp %>% rename(Date = dt, AvgTemp = LandAverageTemperature)
+
+TempByCountry <- TempByCountry %>% rename(Date = dt, AvgTemp = AverageTemperature, Country = Country)
+```
+
+```{r}
+CoalConsumptionByCountry <- CoalConsumptionByCountry %>% rename(Country = Entity, consumption = Coal.consumption...TWh)
+
+FossilFuelConsumptionByType <- FossilFuelConsumptionByType %>% rename(Country = Entity, CoalConsumption = Coal.consumption...TWh, GasConsumption = Gas.consumption...TWh, OilConsumption = Oil.consumption...TWh)
+
+GlobalFossilFuelConsumption <- GlobalFossilFuelConsumption %>% rename(Country = Entity, CoalConsumption = Coal..TWh..direct.energy., GasConsumption = Gas..TWh..direct.energy., OilConsumption = Oil..TWh..direct.energy.)
+```
+
+Remove rows with no temperature or data as they won't be useful for data analysis:
+
+```{r message=FALSE}
+
+GlobalTemp <- GlobalTemp[!is.na(GlobalTemp$AvgTemp), ]
+
+TempByCountry <- TempByCountry[!is.na(TempByCountry$AvgTemp), ]
+```
+
+The chosen data set for temperatures is recorded monthly. We will get the yearly average to better compare with the fossil fuel data sets.
+
+```{r message=FALSE}
+# get the average temperate throughout the year and group them by year and country
+GlobalTemp <- GlobalTemp %>%
+  mutate(Year = as.integer(format(as.Date(Date), "%Y"))) %>%
+  group_by(Year) %>%
+  summarize(AvgTemp = mean(AvgTemp, na.rm = TRUE))
+
+TempByCountry <- TempByCountry %>%
+  mutate(Year = as.integer(format(as.Date(Date), "%Y"))) %>%
+  group_by(Year, Country) %>%
+  summarize(AvgTemp = mean(AvgTemp, na.rm = TRUE))
+```
+
+It is essential that we match the dates of the temperature logs and fossil consumption statistics for accurate comparison, which is why we will only examine the years that are included in all data sets to compare the rising temperatures vs fossil fuel usage and filtering the data set:
+
+```{r}
+# earliest year in the temp data set
+minYearsTemp <- c(
+  min(GlobalTemp$Year, na.rm = TRUE),
+  min(TempByCountry$Year, na.rm = TRUE)
+)
+
+# latest among the earliest year so it is inclusive in all data sets
+LowerBoundTemp <- max(minYearsTemp, na.rm = TRUE)
+print(LowerBoundTemp)
+
+# latest year in the temp data set
+maxYearsTemp <- c(
+  max(GlobalTemp$Year, na.rm = TRUE),
+  max(TempByCountry$Year, na.rm = TRUE)
+)
+
+# earliest among the latest year so it is inclusive in all data sets
+UpperBoundTemp <- min(maxYearsTemp, na.rm = TRUE)
+print(UpperBoundTemp)
+
+```
+
+```{r}
+
+# earliest year in the fossil fuel data set
+minYearsFossil <- c(
+  min(CoalConsumptionByCountry$Year, na.rm = TRUE),
+  min(FossilFuelConsumptionByType$Year, na.rm = TRUE),
+  min(GlobalFossilFuelConsumption$Year, na.rm = TRUE)
+)
+
+# latest among the earliest year so it is inclusive in all data sets
+LowerBoundFossil <- max(minYearsFossil, na.rm = TRUE)
+print(LowerBoundFossil)
+
+# latest year in the fossil fuel data set
+maxYearsFossil <- c(
+  max(CoalConsumptionByCountry$Year, na.rm = TRUE),
+  max(FossilFuelConsumptionByType$Year, na.rm = TRUE),
+  max(GlobalFossilFuelConsumption$Year, na.rm = TRUE)
+)
+
+# earliest among the latest year so it is inclusive in all data sets
+UpperBoundFossil <- min(maxYearsFossil, na.rm = TRUE)
+print(UpperBoundFossil)
+
+```
+
+Based on this, we will include years 1965 to 2013 for comparing rising temperatures with fossil fuel consumption to ensure that the year is inclusive in all data sets when filtering. This information will also help with titling our graphs.
+
+We will now filter data sets to be used for comparisons between the different data sets only:
+
+```{r}
+GlobalTempFiltered <- GlobalTemp %>% filter(Year >= 1965 & Year <= 2013)
+TempByCountryFiltered <- TempByCountry %>% filter(Year >= 1965 & Year <= 2013)
+CoalConsumptionByCountryFiltered <- CoalConsumptionByCountry %>% filter(Year >= 1965 & Year <= 2013)
+FossilFuelConsumptionByTypeFiltered <- FossilFuelConsumptionByType %>% filter(Year >= 1965 & Year <= 2013)
+GlobalFossilFuelConsumptionFiltered <- GlobalFossilFuelConsumption %>% filter(Year >= 1965 & Year <= 2013)
+
+```
+
+## Exploration of the Temperature Data
+
+Finally, we can explore our temperature data sets to answer our initial questions. We will start by observing the rising temperature globally.
+
+```{r message=FALSE}
+ggplot(GlobalTemp, aes(x = Year, y = AvgTemp)) +
+  geom_line(color = "darkgreen") +  
+  geom_smooth(method = "loess", color = "lightgreen") +  
+  labs(x = "Year", y = "Average Temperature") +
+  scale_x_continuous(breaks = seq(1750, max(GlobalTemp$Year), by = 50)) +
+  ggtitle("Rising Temperatures Over Time Globally") +
+  theme(
+        text = element_text(color = "darkgreen"), 
+        axis.text = element_text(color = "darkgreen"), 
+        axis.title = element_text(color = "darkgreen"),
+        plot.title = element_text(color = "darkgreen")) 
+
+```
+
+**Analysis**: According to the graph above, we see that there is a significant rise in temperature globally as the regression line has a positive slope. Looking closely, we can observe the that the average temperature was actually high before 1800, reaching almost 9.5 degrees Celsius, but later dropping to below 7 degrees Celsius during the early 1800's. The average global temperature then rises continually though out the decades, the most recent calculated average temperature being over 9.5 degrees Celsius.
+
+This leads us to the question: ***What countries have experienced the highest change in average temperature?***
+
+Top 50 countries with the most change in temperature:
+
+```{r}
+# Find the latest starting year among all countries
+# this is just in case some countries have started recording their average temperatures much later
+latest_start_year <- TempByCountry %>%
+  group_by(Country) %>%
+  summarize(StartYear = min(Year)) %>%
+  summarize(LatestStartYear = max(StartYear))
+
+temp_filtered <- TempByCountry %>%
+  filter(Year == latest_start_year$LatestStartYear | Year == max(Year))
+
+# Calculate the temperature difference for each country
+temperature_diff <- temp_filtered %>%
+  group_by(Country) %>%
+  summarize(TempChange = max(AvgTemp) - min(AvgTemp))
+
+# Sort the data by temperature change 
+temperature_diff_top50 <- arrange(temperature_diff, desc(TempChange)) %>%
+  slice_head(n = 40)
+
+# Bar graph highlighting the change in temperature  
+ggplot(temperature_diff_top50, aes(x = reorder(Country, TempChange), y = TempChange)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  labs(x = "Country", y = "Temperature Change (°C)", title = "Top 40 Countries with Greatest Temperature Change from 1948 to 2013") + #found thorugh print statement
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), plot.title = element_text(hjust = 0.5)) 
+```
+
+According to the bar graph, Canada seems to have had the highest rise in temperature since 1948. Now that we have our top 40 countries that have gone through a rising of temperatures:
+
+***How does global warming look in different parts of the world?***
+
+```{r}
+# Replace 'United States' with 'United States of America' in the Country column
+temperature_diff$Country <- replace(temperature_diff$Country, 
+        temperature_diff$Country == 'United States','United States of America')
+
+# Load world countries spatial data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Recode country name
+temperature_diff$Country <- dplyr::recode(temperature_diff$Country,
+                                          'United States' = 'United States of America')
+
+temperature_diff$Country <- factor(temperature_diff$Country, levels = world$name)
+
+world_temp_change <- merge(world, temperature_diff, by.x = "name", by.y = "Country", all.x = TRUE)
+
+# Plot temperature change by country
+ggplot(data = world_temp_change) +
+  geom_sf(aes(fill = TempChange), color = "white", size = 0.25) +
+  scale_fill_viridis_c(name = "Temperature\nChange (°C)", option = "C") +
+  labs(title = "Temperature Change by Country") +
+  theme_minimal()
+```
+
+The geo-graph above shows the difference in temperature between 1948 and 2013. Based on the map, Canada seems to have the highest change in temperatures, confirming our findings from the first bar chart. The map also highlights the low change in temperatures throughout the years along the equator and in countries that are not as developed as other western nations like Canada and the US. Some countries with the most visually noticeable change in temperatures are Canada, Russia, and the United States.
+
+## Exploration of the Fossil Fuel Data
+
+Now we will look at fossil fuels and their usage. Our objective is to find out whether coal is the most consumed fossil fuel globally, or if there is a much commonly used source.
+
+***What is the most commonly consumed fossil fuel?***
+
+```{r}
+
+# Calculate total consumption of gas, coal, and oil by country
+total_consumption <- FossilFuelConsumptionByType %>%
+  group_by(Country) %>%
+  summarise(
+    total_gas = sum(GasConsumption, na.rm = TRUE),
+    total_coal = sum(CoalConsumption, na.rm = TRUE),
+    total_oil = sum(OilConsumption, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  summarise(
+    total_gas = sum(total_gas),
+    total_coal = sum(total_coal),
+    total_oil = sum(total_oil)
+  )
+
+total_consumption_long <- total_consumption %>%
+  pivot_longer(
+    cols = c(total_gas, total_coal, total_oil), 
+    names_to = "Fuel", 
+    values_to = "Consumption",
+    names_prefix = "total_"
+  )
+
+# Rename the fuel types
+total_consumption_long$Fuel <- recode(total_consumption_long$Fuel,
+                                      gas = "Gas",
+                                      coal = "Coal",
+                                      oil = "Oil")
+
+custom_colors <- c("#A4AF69", "#689F38", "#504B3A")
+
+# Create polar bar chart
+ggplot(total_consumption_long, aes(x = "", y = Consumption, fill = Fuel)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  labs(title = "Total Consumption of Gas, Coal, and Oil") +
+  theme_economist() +
+  theme(legend.position = "bottom",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        plot.background = element_rect(fill = "white", color = NA), 
+        plot.margin = margin(2,3,2,3, "cm")) + 
+  scale_fill_manual(values = custom_colors)
+
+```
+
+Based on the pie chart, we can conclude that coal is not the most consumed fossil fuel, or at least was not for a few decades. The most consumed fossil fuel was **oil**.\
+Because of this, we will be focusing on the trends of consumption of oil around the world, by first loading and cleaning the new data set:
+
+```{r}
+OilConsumptionByCountry <- read.csv("oil-consumption-by-country.csv")
+```
+
+```{r}
+OilConsumptionByCountry <- OilConsumptionByCountry %>% rename(Country = Entity, consumption = Oil.consumption...TWh)
+
+OilConsumptionByCountryFiltered <- OilConsumptionByCountry %>% filter(Year >= 1965 & Year <= 2013)
+
+```
+
+Even though oil is the most consumed fossil fuel worldwide, we may find some regions or countries that have other preferences. We will be comparing how much of each type of fossil fuel the top regions have used to find a common trend. so ***which countries or regions have the highest usage of the commonly consumed fossil fuel?***
+
+```{r, fig.width=15, fig.height=10}
+
+# get total consumption of all fossil fuels
+total_consumption <- FossilFuelConsumptionByType %>%
+  group_by(Country) %>%
+  summarise(
+    TotalGasConsumption = sum(GasConsumption),
+    TotalOilConsumption = sum(OilConsumption),
+    TotalCoalConsumption = sum(CoalConsumption),
+    TotalFuelConsumption = sum(GasConsumption + OilConsumption + CoalConsumption)
+  ) %>%
+  ungroup()
+
+sorted_countries <- total_consumption %>%
+  arrange(desc(TotalFuelConsumption)) %>%
+  slice_head(n = 15)
+
+sorted_countries$Country <- factor(sorted_countries$Country, levels = sorted_countries$Country)
+
+# exclude TotalFuelConsumption - we are only using this to sort the bars
+sorted_countries_long <- sorted_countries %>%
+  select(-TotalFuelConsumption) %>% 
+  pivot_longer(cols = starts_with("Total"), names_to = "Fuel", values_to = "Consumption")
+
+plot <- ggplot(sorted_countries_long, aes(x = Country, y = Consumption, fill = Fuel)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Top 15 Regions by Fuel Consumption",
+       x = "Country",
+       y = "Total Consumption",
+       fill = "Fuel Type") +
+  scale_fill_manual(values = c("TotalGasConsumption" = "lightgreen",
+                               "TotalOilConsumption" = "darkgreen",
+                               "TotalCoalConsumption" = "chocolate")) +
+  theme_stata() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 20),
+        axis.text.y = element_text(angle = 45, size = 20),
+        axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 20),
+        plot.title = element_text(size = 25, hjust = 0.5),
+        legend.text = element_text(size = 20),  
+        legend.title = element_text(size = 20), 
+        legend.key.size = unit(1.5, "cm"))  
+
+plot
+
+```
+
+Based on the visuals, high-income countries mostly use oil as a source of energy, whereas upper-middle-income countries use coal. In addition, we see western countries and continents such as Europe, North America, United States, and the European Union consuming oil more than other sources of fossil fuels.
+
+However, Asia resorts to using coal primarily, with the second most used fuel being oil. China also uses coal primarily, rarely consuming oil or gas. The only region that uses gas more than other forms of fossil fuel is CIS (Commonwealth of Independent States), which consists of the former Soviet Republic.
+
+## Finding the Correlation Between Global Oil Consumption and Rising Global Temperatures
+
+***Is the rate of the rising temperature globally correlated with the usage of fossil fuel globally?***
+
+Source: <http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/81-ggplot2-easy-way-to-mix-multiple-graphs-on-the-same-page/>
+
+```{r}
+global_temp <- subset(GlobalTemp, Year >= 1800 & Year <= 2013)
+global_fossil_fuel <- subset(GlobalFossilFuelConsumption, Year >= 1800 & Year <= 2013)
+
+#create individual graphs for each data set
+plot_temp <- ggplot(global_temp, aes(x = Year, y = AvgTemp)) +
+  geom_line() +
+  labs(title = "Global Average Temperature",
+       y = "Average Temperature",
+       x = "Year") +
+  theme_minimal()
+
+plot_oil <- ggplot(global_fossil_fuel, aes(x = Year, y = OilConsumption)) +
+  geom_line() +
+  labs(title = "Global Consumption of Oil (TWh)",
+       y = "Oil Consumption",
+       x = "Year") +
+  theme_minimal()
+
+# Arrange the plots side by side for better comparison
+grid.arrange(plot_temp, plot_oil, ncol = 2)
+
+```
+
+The graphs above shows a comparison between the rising temperatures globally and the increasing energy consumption of oil. Although we can state that oil being produced and consumed is increasing the temperature globally due to their similar increasing pattern, we cannot draw to this conclusion as the consumption of fossil fuel will always increase, much like the global temperature for a long time until there is a drastic change in human behaviors.
+
+## Conclusion
+
+To summarize, we have explored the global temperature data sets and fossil fuel consumption data sets to see if there are any direct influence between the two. After completing the study, one can conclude that the increased usage in fossil fuel, such as oil, is a leading cause of global warming, specifically in places like North America. However, we must keep an open mind to other climate change factors other than fossil fuel consumption in order to live on a sustainable planet.
